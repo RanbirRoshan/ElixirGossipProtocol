@@ -1,3 +1,15 @@
+defmodule Util do
+  def trackTaskCompletion(server_pid) do
+    {state, response} = GenServer.call(server_pid,{:ProcessState})
+    if (state == :complete) do
+      {state, response}
+    else
+      :timer.sleep(100)
+      trackTaskCompletion(server_pid)
+    end
+  end
+end
+
 import MyNode
 defmodule Dosassignment2 do
   use GenServer
@@ -93,9 +105,9 @@ defmodule Dosassignment2 do
 
     if (Enum.count(node_list)>1) do
       random_node_1 = Enum.random(node_list)
-      List.delete(node_list, random_node_1)
+      node_list = List.delete(node_list, random_node_1)
       random_node_2 = Enum.random(node_list)
-      List.delete(node_list, random_node_2)
+      node_list = List.delete(node_list, random_node_2)
 
       GenServer.call(random_node_1, {:addNeighbor, random_node_2})
       GenServer.call(random_node_2, {:addNeighbor, random_node_1})
@@ -195,7 +207,8 @@ defmodule Dosassignment2 do
   def handle_call({:initialize, topology, algo, num_node}, _from, _state) do
     Logger.info("Application Initialization in progress")
 
-    state = %{:num_nodes => num_node, :algo => algo, :topology => topology, :nodes => []}
+    time = :os.system_time(:millisecond)
+    state = %{:num_nodes => num_node, :algo => algo, :topology => topology, :nodes => [], :completed_childs => [], :last_ping => time, :start => time}
 
     Logger.info("Creating topology")
 
@@ -214,4 +227,63 @@ defmodule Dosassignment2 do
     {:reply, :ok, state}
   end
 
+  @impl true
+  def handle_cast({:informCompletion, child_id}, state) do
+    IO.puts("Completed #{inspect child_id}")
+    list = state.completed_childs ++ [child_id]
+    state = %{state | :completed_childs => list}
+    {:noreply, state}
+  end
+
+  @impl true
+  def handle_cast({:startProcess}, state) do
+    if state.algo == MyNode.gossip() do
+      #GenServer.cast(Enum.random(state.nodes), {:gossip})
+    else
+      GenServer.cast(Enum.random(state.nodes), {:initiate_push_sum})
+    end
+    {:noreply, state}
+  end
+
+  def printChildStates(list, i, max) do
+    if i != max do
+      GenServer.call(Enum.at(list, i), {:print_state})
+      printChildStates(list, i+1, max)
+    end
+  end
+
+  def printStates(list) do
+    elem = Enum.at(list, 0)
+    GenServer.call(elem, {:print_state})
+    if Enum.count(list) > 1 do
+      printStates(List.delete(list, elem))
+    end
+  end
+
+  @impl true
+  def handle_call({:ProcessState}, from, state) do
+
+    if (state.algo == MyNode.gossip()) do
+      {:reply, {:complete, "Not Implemented"}, state}
+    else
+      cond do
+        (Enum.count(Enum.uniq(state.nodes)) == Enum.count(Enum.uniq(state.completed_childs))) ->
+          {:reply, {:complete, "coverged"}, state}
+        :os.system_time(:millisecond) - state.last_ping > 1500 ->
+          printStates(state.nodes)
+          IO.puts("#{inspect state.nodes}")
+          IO.puts("#{inspect state.completed_childs}")
+          {:reply, {:complete, "not converged"}, state}
+        true ->
+          {:reply, {:inprogress, ""}, state}
+      end
+    end
+  end
+
+  @impl true
+  def handle_cast({:ping}, state) do
+    #IO.puts("ping recieved")
+    state = %{state | :last_ping => :os.system_time(:millisecond)}
+    {:noreply, state}
+  end
 end

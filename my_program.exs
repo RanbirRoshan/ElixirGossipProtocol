@@ -1,3 +1,5 @@
+
+
 defmodule Main do
   require Logger
   # Dosassignment2
@@ -36,6 +38,11 @@ defmodule Main do
         :erlang.statistics(:wall_clock)
 
         #initate the process (must be a call)
+        GenServer.cast(server_pid, {:startProcess})
+
+        {state, response} = Util.trackTaskCompletion(server_pid)
+
+        IO.puts("response : #{state} #{inspect response}")
 
         #capture time here for statistics
         {_, wall_clock} = :erlang.statistics(:wall_clock)
