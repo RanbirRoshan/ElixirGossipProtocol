@@ -34,6 +34,12 @@ defmodule MyNode do
   end
 
   @impl true
+  def handle_call({:printNeighbor}, _from, state) do
+    IO.puts("#{inspect self()} Has Neighbors   #{inspect state.neighbor}")
+    {:reply, :ok, state}
+  end
+
+  @impl true
   def handle_call({:addNeighbor, neighbor_pid}, _from, state) do
     state = %{state | :neighbor => state.neighbor ++ neighbor_pid}
     #IO.puts("#{inspect self()}   #{inspect state}")

@@ -68,18 +68,18 @@ defmodule Dosassignment2 do
     end
   end
 
-  def addNextHoneyCombNode(count, max, algo) when count==max do
+  def createNodeList(count, max, algo) when count==max do
     []
   end
 
-  def addNextHoneyCombNode(count, max, algo) do
+  def createNodeList(count, max, algo) do
     # create a new actor genserver
     {:ok, new_node} = GenServer.start(MyNode, %{})
 
     # initalize the genserver with the previous node as the neighbor
     GenServer.call(new_node, {:initialize, algo, count, [], self()})
 
-    [new_node] ++ addNextHoneyCombNode(count+1, max, algo)
+    [new_node] ++ createNodeList(count+1, max, algo)
   end
 
   def createListForHoneyComb(all_node_list, pos, line_no, max) when pos>=max do
@@ -89,9 +89,9 @@ defmodule Dosassignment2 do
   def createListForHoneyComb(all_node_list, pos, line_no, max) do
     list =
       if (rem(line_no, 2) > 0) do
-        [[[Enum.at(all_node_list,pos)],[],[],[Enum.at(all_node_list,pos+1)],[Enum.at(all_node_list,pos+2)],[],[],[Enum.at(all_node_list,pos+3)]]]
-      else
         [[[],[Enum.at(all_node_list,pos)],[Enum.at(all_node_list,pos+1)],[],[],[Enum.at(all_node_list,pos+2)],[Enum.at(all_node_list,pos+3)],[]]]
+      else
+        [[[Enum.at(all_node_list,pos)],[],[],[Enum.at(all_node_list,pos+1)],[Enum.at(all_node_list,pos+2)],[],[],[Enum.at(all_node_list,pos+3)]]]
       end
 
     list ++ createListForHoneyComb(all_node_list, pos+4, line_no+1, max)
@@ -109,8 +109,8 @@ defmodule Dosassignment2 do
       random_node_2 = Enum.random(node_list)
       node_list = List.delete(node_list, random_node_2)
 
-      GenServer.call(random_node_1, {:addNeighbor, random_node_2})
-      GenServer.call(random_node_2, {:addNeighbor, random_node_1})
+      GenServer.call(random_node_1, {:addNeighbor, [random_node_2]})
+      GenServer.call(random_node_2, {:addNeighbor, [random_node_1]})
 
       addRandomHoneyCombNeighbor(node_list)
     end
@@ -178,22 +178,135 @@ defmodule Dosassignment2 do
     end
 
     #create the required number of nodes and get the list of all nodes
-    all_nodes = addNextHoneyCombNode(0, num_node, state.algo)
+    all_nodes = createNodeList(0, num_node, state.algo)
 
     node_list = createListForHoneyComb(all_nodes, 0, 0, num_node)
 
+    IO.inspect(node_list)
     addHoneyCombNeighbor(node_list)
 
     if (with_random_network) do
-      addRandomHoneyCombNeighbor(node_list)
+      addRandomHoneyCombNeighbor(all_nodes)
     end
+
+    printNeighborDetails(all_nodes, 0)
 
     all_nodes
   end
 
+
+  def addNextFullNode(all_node_list, count, max, algo) do
+    # create a new actor genserver
+    {:ok, new_node} = GenServer.start(MyNode, %{})
+
+    # initalize the genserver with all previous nodes as the neighbor
+    GenServer.call(new_node, {:initialize, algo, count, [all_node_list], self()})
+
+    # add the current new node as neighbor to all nodes
+    GenServer.call(all_node_list, {:addNeighbor, [new_node]})
+
+    [new_node] ++ addNextFullNode(new_node, count+1, max, algo)
+  end
+
+  def createFullTopology(state) do
+
+    if state.num_nodes > 0 do
+
+      # variable that stores all the nodes known to the server
+
+      {:ok, all_node_list} = GenServer.start(MyNode, %{})
+      GenServer.call(all_node_list, {:initialize, state.algo, 0, [], self()})
+
+      # in full topology all node are connected to one  another 
+      [all_node_list] ++ addNextFullNode(all_node_list, 1, state.num_nodes, state.algo)
+    else
+      []
+    end
+  end
+
+  def createListFor3D(all_node_list, cube_edge) do
+    square = Kernel.trunc(:math.pow(cube_edge,2))
+    for iter <-  1..cube_edge do
+      layer = 
+        for inner_iter <- 1..cube_edge do
+          row =
+            for row_iter <- 1..cube_edge do
+              pos = (iter-1)*square + (inner_iter-1)*cube_edge + (row_iter-1)
+              Enum.at(all_node_list, pos)
+            end
+          row
+        end
+        layer
+    end   
+  end
+
+  def linkTwoRow3d(row1, row2, edge_len) do
+    for iter <- 0..(edge_len-1) do
+      cur_node   = Enum.at(row1, iter)
+      next_node  = Enum.at(row1, rem(iter+1, edge_len))
+      GenServer.call(cur_node, {:addNeighbor, [next_node]})
+      GenServer.call(next_node, {:addNeighbor, [cur_node]})
+      
+      GenServer.call(cur_node, {:addNeighbor, [Enum.at(row2, iter)]})
+      GenServer.call(Enum.at(row2, iter), {:addNeighbor, [cur_node]})
+    end
+  end
+
+  def linkTwo3DLevels(level_cur, level_next, edge_len) do
+    
+    for iter <- 0..(edge_len-1) do    
+      cur_row   = Enum.at(level_cur, iter)
+      next_row  = Enum.at(level_cur, rem(iter+1, edge_len))
+      linkTwoRow3d(cur_row, next_row, edge_len)
+
+      next_level_row = Enum.at(level_next, iter)
+
+      for col <- 0..(edge_len-1) do
+        GenServer.call(Enum.at(cur_row, col), {:addNeighbor, [Enum.at(next_level_row, col)]})
+        GenServer.call(Enum.at(next_level_row, col), {:addNeighbor, [Enum.at(cur_row, col)]})
+      end
+    end
+  end
+
+  def add3DNeighbor(cube_list, edge_len) do
+
+    for iter <- 0..(edge_len-1) do
+
+      cur_node_list   = Enum.at(cube_list, iter)
+      next_node_list  = Enum.at(cube_list, rem(iter+1, edge_len))
+        
+      linkTwo3DLevels(cur_node_list, next_node_list, edge_len)
+    end
+  end
+
+  def printNeighborDetails(node_list, pos) do
+    if pos < Enum.count(node_list) do
+      GenServer.call(Enum.at(node_list, pos), {:printNeighbor})
+      printNeighborDetails(node_list, pos+1)
+    end
+  end
+    
+  def create3DTopology(state) do
+#CUBE FUNCTION
+
+    #nearest_cube = Floor(getNearestCube(state.num_nodes)) # exact cube
+
+    #num_node = :math.pow(nearest_cube, 3)
+
+    #create the required number of nodes and get the list of all nodes
+    #all_nodes = createNodeList(0, num_node, state.algo)
+
+    #cube_list = createListFor3D(all_nodes, nearest_cube, num_node)
+
+    #add3DNeighbor(cube_list, nearest_cube)
+
+    #all_nodes
+  end
+
+
   def initializeTopology(state) do
     case state.topology do
-      @topology_FN    -> Logger.info(@topology_FN)
+      @topology_FN    -> createFullTopology(state) 
       @topology_Line  -> createLineTopology(state)
       @topology_R2D   -> Logger.info(@topology_R2D)
       @topology_3DTG  -> Logger.info(@topology_3DTG)
