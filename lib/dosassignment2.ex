@@ -285,11 +285,21 @@ defmodule Dosassignment2 do
       printNeighborDetails(node_list, pos+1)
     end
   end
-    
+
+    def getNearestCube(3, x, precision \\ 1.0e-5) do
+      f = fn(prev) -> ((n - 1) * prev + x / :math.pow(prev, (n-1))) / n end
+      rec_find(f, x, precision, f.(x))
+
+   
+    defp rec_find(_, guess, tolerance, next) when abs(guess - next) < tolerance, do: next
+    defp rec_find(f, _, tolerance, next), do: fixed_point(f, next, tolerance, f.(next))
+  end
+   
   def create3DTopology(state) do
 #CUBE FUNCTION
 
     #nearest_cube = Floor(getNearestCube(state.num_nodes)) # exact cube
+    nearest_cube = math.Floor(getNearestCube(3,state.num_nodes,1e-5)) # exact cube
 
     #num_node = :math.pow(nearest_cube, 3)
 

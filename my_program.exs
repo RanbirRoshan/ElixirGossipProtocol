@@ -4,6 +4,18 @@ defmodule Main do
   require Logger
   # Dosassignment2
 
+  #all_nodes = Dosassignment2.createNodeList(0, 8, MyNode.push_sum)
+  
+  #IO.inspect(all_nodes)
+
+  #node_list = Dosassignment2.createListFor3D(all_nodes, 2)
+
+  #IO.inspect(node_list)
+
+  #Dosassignment2.add3DNeighbor(node_list, 2)
+
+  #Dosassignment2.printNeighborDetails(all_nodes, 0)
+
   [num_node_arg, topology, algo] = System.argv
 
   {num_node, _} = Integer.parse(num_node_arg)
