@@ -1,6 +1,6 @@
 defmodule Util do
   def trackTaskCompletion(server_pid) do
-    {state, response} = GenServer.call(server_pid,{:ProcessState})
+    {state, response} = GenServer.call(server_pid,{:ProcessState}, 1000000)
     if (state == :complete) do
       {state, response}
     else
@@ -10,7 +10,6 @@ defmodule Util do
   end
 end
 
-import MyNode
 defmodule Dosassignment2 do
   use GenServer
   require Logger
@@ -31,25 +30,37 @@ defmodule Dosassignment2 do
   def topology_HC do @topology_HC end
   def topology_HCRN do @topology_HCRN end
 
+  @impl true
   def init(init_arg) do
     {:ok, init_arg}
   end
 
-  def addNextLineNode(prev_node_pid, count, max, algo) when count==max do
+  def addNextLineNode(_prev_node_pid, count, max, _algo) when count==max do
     []
   end
 
-  def addNextLineNode(prev_node_pid, count, max, algo) do
+  def addNextLineNode(_prev_node_pid, count, max, algo) do
     # create a new actor genserver
-    {:ok, new_node} = GenServer.start(MyNode, %{})
+    new_node = getSingleNode(algo)
 
     # initalize the genserver with the previous node as the neighbor
-    GenServer.call(new_node, {:initialize, algo, count, [prev_node_pid], self()})
+    GenServer.call(new_node, {:initialize, algo, count, [], self()})
 
     # add the current new node as neighbor to previous node
-    GenServer.call(prev_node_pid, {:addNeighbor, [new_node]})
+    #GenServer.call(prev_node_pid, {:addNeighbor, [new_node]})
 
     [new_node] ++ addNextLineNode(new_node, count+1, max, algo)
+  end
+
+  def makeRandomLine(all_nodes, prev_node) do
+
+    if Enum.count(all_nodes) > 0 do
+      random_node = Enum.random(all_nodes)
+
+      GenServer.call(random_node, {:addNeighbor, [prev_node]})
+      GenServer.call(prev_node, {:addNeighbor, [random_node]})
+      makeRandomLine(List.delete(all_nodes, random_node), random_node)
+    end
   end
 
   def createLineTopology(state) do
@@ -58,23 +69,27 @@ defmodule Dosassignment2 do
 
       # variable that stores all the nodes known to the server
 
-      {:ok, prev_node_pid} = GenServer.start(MyNode, %{})
+      prev_node_pid = getSingleNode(state.algo)
       GenServer.call(prev_node_pid, {:initialize, state.algo, 0, [], self()})
 
       # in line topology node are connected one after another and each node knows previous and next node only
       all_nodes = [prev_node_pid] ++ addNextLineNode(prev_node_pid, 1, state.num_nodes, state.algo)
+
+      start = Enum.random(all_nodes)
+      makeRandomLine(List.delete(all_nodes, start), start)
+      all_nodes
     else
       []
     end
   end
 
-  def createNodeList(count, max, algo) when count==max do
+  def createNodeList(count, max, _algo) when count==max do
     []
   end
 
   def createNodeList(count, max, algo) do
     # create a new actor genserver
-    {:ok, new_node} = GenServer.start(MyNode, %{})
+    new_node = getSingleNode(algo)
 
     # initalize the genserver with the previous node as the neighbor
     GenServer.call(new_node, {:initialize, algo, count, [], self()})
@@ -82,7 +97,7 @@ defmodule Dosassignment2 do
     [new_node] ++ createNodeList(count+1, max, algo)
   end
 
-  def createListForHoneyComb(all_node_list, pos, line_no, max) when pos>=max do
+  def createListForHoneyComb(_all_node_list, pos, _line_no, max) when pos>=max do
     []
   end
 
@@ -172,40 +187,55 @@ defmodule Dosassignment2 do
 
     num_node =
     if rem(state.num_nodes, 16) != 0 do
-      num_node = state.num_nodes - rem(state.num_nodes, 16) + 16
+      state.num_nodes - rem(state.num_nodes, 16) + 16
     else
       state.num_nodes
     end
 
     #create the required number of nodes and get the list of all nodes
-    all_nodes = createNodeList(0, num_node, state.algo)
+    all_nodes = Enum.shuffle(createNodeList(0, num_node, state.algo))
 
     node_list = createListForHoneyComb(all_nodes, 0, 0, num_node)
 
-    IO.inspect(node_list)
+    #IO.inspect(node_list)
     addHoneyCombNeighbor(node_list)
 
     if (with_random_network) do
       addRandomHoneyCombNeighbor(all_nodes)
     end
 
-    printNeighborDetails(all_nodes, 0)
+    #printNeighborDetails(all_nodes, 0)
 
     all_nodes
   end
 
-
   def addNextFullNode(all_node_list, count, max, algo) do
-    # create a new actor genserver
-    {:ok, new_node} = GenServer.start(MyNode, %{})
+    if (count < max) do
+      # create a new actor genserver
+      new_node = getSingleNode(algo)
 
-    # initalize the genserver with all previous nodes as the neighbor
-    GenServer.call(new_node, {:initialize, algo, count, [all_node_list], self()})
+      # initalize the genserver with all previous nodes as the neighbor
+      GenServer.call(new_node, {:initialize, algo, count, all_node_list, self()})
 
-    # add the current new node as neighbor to all nodes
-    GenServer.call(all_node_list, {:addNeighbor, [new_node]})
+      for item <- all_node_list do
+        # add the current new node as neighbor to all nodes
+        GenServer.call(item, {:addNeighbor, [new_node]})
+      end
 
-    [new_node] ++ addNextFullNode(new_node, count+1, max, algo)
+      [new_node] ++ addNextFullNode(all_node_list ++ [new_node], count+1, max, algo)
+    else
+      []
+    end
+  end
+
+  def getSingleNode(_algo) do
+    {:ok, node} =
+      #if algo == PushSumNode.push_sum() do
+        GenServer.start(PushSumNode, %{})
+      #else
+      #  GenServer.start(GossipNode, %{})
+      #end
+    node
   end
 
   def createFullTopology(state) do
@@ -213,12 +243,12 @@ defmodule Dosassignment2 do
     if state.num_nodes > 0 do
 
       # variable that stores all the nodes known to the server
+      new_node = getSingleNode(state.algo)
 
-      {:ok, all_node_list} = GenServer.start(MyNode, %{})
-      GenServer.call(all_node_list, {:initialize, state.algo, 0, [], self()})
+      GenServer.call(new_node, {:initialize, state.algo, 0, [], self()})
 
       # in full topology all node are connected to one  another 
-      [all_node_list] ++ addNextFullNode(all_node_list, 1, state.num_nodes, state.algo)
+      [new_node] ++ addNextFullNode([new_node], 1, state.num_nodes, state.algo)
     else
       []
     end
@@ -286,20 +316,19 @@ defmodule Dosassignment2 do
     end
   end
 
-    def getNearestCube(3, x, precision \\ 1.0e-5) do
-      f = fn(prev) -> ((n - 1) * prev + x / :math.pow(prev, (n-1))) / n end
-      rec_find(f, x, precision, f.(x))
-
-   
-    defp rec_find(_, guess, tolerance, next) when abs(guess - next) < tolerance, do: next
-    defp rec_find(f, _, tolerance, next), do: fixed_point(f, next, tolerance, f.(next))
+  def ceiling(num) do
+    trunc = :erlang.trunc(num)
+    cond do
+      num - trunc > 0 -> trunc + 1
+      true -> trunc
+    end
   end
-   
-  def create3DTopology(state) do
-#CUBE FUNCTION
 
-    #nearest_cube = Floor(getNearestCube(state.num_nodes)) # exact cube
-    nearest_cube = math.Floor(getNearestCube(3,state.num_nodes,1e-5)) # exact cube
+  def create3DTopology(state) do
+    #CUBE FUNCTION
+
+    #nearest_cube = ceiling(getNearestCube(state.num_nodes)) # exact cube
+   # nearest_cube = math.Floor(getNearestCube(3,state.num_nodes,1e-5)) # exact cube
 
     #num_node = :math.pow(nearest_cube, 3)
 
@@ -312,7 +341,6 @@ defmodule Dosassignment2 do
 
     #all_nodes
   end
-
 
   def initializeTopology(state) do
     case state.topology do
@@ -327,11 +355,74 @@ defmodule Dosassignment2 do
   end
 
   @impl true
+  def handle_call({:getPendingRatio}, _from, state) do
+
+    total = Enum.count(state.nodes)
+    ratio =
+      if(Enum.count(state.completed_childs) == total) do
+        1
+      else
+        val = div(total, total - Enum.count(state.completed_childs))
+        if(val>10) do
+          10
+        else
+          val
+        end
+      end
+
+    #IO.puts("Ratio #{ratio}")
+    {:reply, 1/:math.pow(3, ratio), state}
+  end
+
+  @impl true
+  def handle_call({:ProcessState}, _from, state) do
+
+    #if (state.algo == PushSumNode.gossip()) do
+    #  {:reply, {:complete, "Not Implemented"}, state}
+    #else
+      complete_count = Enum.count(state.completed_childs)
+      total = Enum.count(state.nodes)
+      completionratio = complete_count/total;
+      cond do
+        (Enum.count(Enum.uniq(state.nodes)) == Enum.count(Enum.uniq(state.completed_childs))) ->
+          {:reply, {:complete, "coverged by 100%"}, state}
+        (state.topology == @topology_3DTG && (:os.system_time(:millisecond) - state.lastCompletionTime) > 5500 && completionratio>=0.8) ->
+          {:reply, {:complete, "converged by #{completionratio*100}%"}, state}
+        (state.topology == @topology_R2D && (:os.system_time(:millisecond) - state.lastCompletionTime) > 5500 && completionratio>=0.75) ->
+          {:reply, {:complete, "converged by #{completionratio*100}%"}, state}
+        (state.topology == @topology_HCRN && (:os.system_time(:millisecond) - state.lastCompletionTime) > 10500 && completionratio>=0.825) ->
+          {:reply, {:complete, "converged by #{completionratio*100}%"}, state}
+        (state.topology == @topology_HC && (:os.system_time(:millisecond) - state.lastCompletionTime) > 10500 && completionratio>=0.8) ->
+          {:reply, {:complete, "converged by #{completionratio*100}%"}, state}
+        (state.topology == @topology_FN && (:os.system_time(:millisecond) - state.lastCompletionTime) > 5500 && completionratio>=0.9) ->
+          {:reply, {:complete, "converged by #{completionratio*100}%"}, state}
+        (state.topology == @topology_Line && (:os.system_time(:millisecond) - state.lastCompletionTime) > 5500 && completionratio>=0.85) ->
+          {:reply, {:complete, "converged by #{completionratio*100}%"}, state}
+        (state.topology == @topology_3DTG && (:os.system_time(:millisecond) - state.lastCompletionTime) > 5500 && completionratio<0.8) ->
+          {:reply, {:inprogress, ""}, state}
+        (state.topology == @topology_R2D && (:os.system_time(:millisecond) - state.lastCompletionTime) > 5500 && completionratio<0.75) ->
+          {:reply, {:inprogress, ""}, state}
+        (state.topology == @topology_HCRN && (:os.system_time(:millisecond) - state.lastCompletionTime) > 10500 && completionratio<0.825) ->
+          {:reply, {:inprogress, ""}, state}
+        (state.topology == @topology_HC && (:os.system_time(:millisecond) - state.lastCompletionTime) > 10500 && completionratio<0.8) ->
+          {:reply, {:inprogress, ""}, state}
+        (state.topology == @topology_FN && (:os.system_time(:millisecond) - state.lastCompletionTime) > 5500 && completionratio<0.9) ->
+          {:reply, {:inprogress, ""}, state}
+        (state.topology == @topology_Line && (:os.system_time(:millisecond) - state.lastCompletionTime) > 5500 && completionratio<0.85) ->
+          {:reply, {:inprogress, ""}, state}
+        true->
+          {:reply, {:inprogress, ""}, state}
+
+      end
+    #end
+  end
+
+  @impl true
   def handle_call({:initialize, topology, algo, num_node}, _from, _state) do
     Logger.info("Application Initialization in progress")
 
     time = :os.system_time(:millisecond)
-    state = %{:num_nodes => num_node, :algo => algo, :topology => topology, :nodes => [], :completed_childs => [], :last_ping => time, :start => time}
+    state = %{:num_nodes => num_node, :lastCompletionTime => time, :algo => algo, :topology => topology, :nodes => [], :completed_childs => [], :last_ping => time, :start => time}
 
     Logger.info("Creating topology")
 
@@ -351,20 +442,32 @@ defmodule Dosassignment2 do
   end
 
   @impl true
-  def handle_cast({:informCompletion, child_id}, state) do
-    IO.puts("Completed #{inspect child_id}")
+  def handle_cast({:inform_completion, child_id}, state) do
     list = state.completed_childs ++ [child_id]
     state = %{state | :completed_childs => list}
+    if state.algo == PushSumNode.push_sum() do
+      Logger.info("yet to complete #{Enum.count(state.nodes) - Enum.count(list)}")
+    end
+    state = %{state|:lastCompletionTime =>:os.system_time(:millisecond)}
     {:noreply, state}
   end
 
   @impl true
   def handle_cast({:startProcess}, state) do
-    if state.algo == MyNode.gossip() do
-      #GenServer.cast(Enum.random(state.nodes), {:gossip})
-    else
-      GenServer.cast(Enum.random(state.nodes), {:initiate_push_sum})
-    end
+    #if state.algo == PushSumNode.gossip() do
+    #  GenServer.cast(Enum.random(state.nodes), {:initiate_algo})
+    #else
+      GenServer.cast(Enum.random(state.nodes), {:initiate_algo})
+    #end
+    state = %{state|:last_ping =>:os.system_time(:millisecond)}
+    state = %{state|:lastCompletionTime =>:os.system_time(:millisecond)}
+    {:noreply, state}
+  end
+
+  @impl true
+  def handle_cast({:ping}, state) do
+    #IO.puts("ping recieved #{inspect :os.system_time(:millisecond)}")
+    state = %{state | :last_ping => :os.system_time(:millisecond)}
     {:noreply, state}
   end
 
@@ -383,30 +486,4 @@ defmodule Dosassignment2 do
     end
   end
 
-  @impl true
-  def handle_call({:ProcessState}, from, state) do
-
-    if (state.algo == MyNode.gossip()) do
-      {:reply, {:complete, "Not Implemented"}, state}
-    else
-      cond do
-        (Enum.count(Enum.uniq(state.nodes)) == Enum.count(Enum.uniq(state.completed_childs))) ->
-          {:reply, {:complete, "coverged"}, state}
-        :os.system_time(:millisecond) - state.last_ping > 1500 ->
-          printStates(state.nodes)
-          IO.puts("#{inspect state.nodes}")
-          IO.puts("#{inspect state.completed_childs}")
-          {:reply, {:complete, "not converged"}, state}
-        true ->
-          {:reply, {:inprogress, ""}, state}
-      end
-    end
-  end
-
-  @impl true
-  def handle_cast({:ping}, state) do
-    #IO.puts("ping recieved")
-    state = %{state | :last_ping => :os.system_time(:millisecond)}
-    {:noreply, state}
-  end
 end

@@ -34,16 +34,16 @@ defmodule Main do
       Logger.info("Invalid Topology Parameter. Current supported topology strings are:\n\t" <> Dosassignment2.topology_FN <> "\n\t" <>
                                                                                                Dosassignment2.topology_Line <> "\n\t" <> Dosassignment2.topology_R2D <> "\n\t" <> Dosassignment2.topology_3DTG <> "\n\t" <> Dosassignment2.topology_HC <> "\n\t" <> Dosassignment2.topology_HCRN)
     else
-      if (algo != MyNode.gossip && algo != MyNode.push_sum) do
-        Logger.info("Invalid Algorithm Parameter. Current supported algorithm strings are:\n\t" <> MyNode.gossip <> "\n\t" <>
-                                                                                                                    MyNode.push_sum)
+      if (algo != PushSumNode.gossip && algo != PushSumNode.push_sum) do
+        Logger.info("Invalid Algorithm Parameter. Current supported algorithm strings are:\n\t" <> PushSumNode.gossip <> "\n\t" <>
+                                                                                                                         PushSumNode.push_sum)
       else
 
         #now that we have everything proper start genserver
         {:ok, server_pid} = GenServer.start(Dosassignment2, %{})
 
         #create topology on the genserver (Must be a call)
-        GenServer.call(server_pid, {:initialize, topology, algo, num_node})
+        GenServer.call(server_pid, {:initialize, topology, algo, num_node}, 100000000)
 
         #reset time here for statistics collection for convergence
         #:erlang.statistics(:runtime)

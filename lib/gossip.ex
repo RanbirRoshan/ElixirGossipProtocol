@@ -1,4 +1,4 @@
-defmodule MyNode do
+defmodule GossipNode do
   use GenServer
   require Logger
 
